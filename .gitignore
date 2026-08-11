@@ -1,0 +1,81 @@
+# ────────────────────────────────────────────────
+# AutoOps AI — .gitignore
+# ────────────────────────────────────────────────
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.venv/
+venv/
+env/
+.env
+*.env
+.env.*
+!.env.example
+
+# Node / React
+node_modules/
+.next/
+dist/
+build/
+*.tsbuildinfo
+.npm
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Kubernetes / Helm
+*.kubeconfig
+kubeconfig*
+helm/*/charts/
+helm/*/Chart.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets (NEVER commit these)
+secrets/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*secret*
+*password*
+*credential*
+
+# Logs
+*.log
+logs/
+*.pid
+
+# Docker
+.docker/
+
+# ChromaDB (vector store data)
+chroma_db/
+*.chroma
+
+# Coverage
+coverage/
+.coverage
+htmlcov/
