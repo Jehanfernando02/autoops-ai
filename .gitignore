@@ -79,3 +79,4 @@ chroma_db/
 coverage/
 .coverage
 htmlcov/
+notes/
