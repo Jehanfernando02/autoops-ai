@@ -1,0 +1,13 @@
+# Files/dirs to EXCLUDE from the Docker build context.
+# The build context is everything Docker sends to the daemon.
+# Excluding unnecessary files makes builds faster.
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.DS_Store
