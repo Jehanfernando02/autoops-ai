@@ -1,0 +1,187 @@
+# ─────────────────────────────────────────────────────────────────
+# docker-compose.yml
+#
+# WHAT IS DOCKER COMPOSE?
+# It orchestrates multiple containers locally. Instead of running
+# `docker run ...` 7 times with all the right flags, you define
+# everything here and run `docker compose up`.
+#
+# WHY DO WE NEED THIS IF WE'RE USING KUBERNETES?
+# - Kubernetes is for production/staging. docker compose is for
+#   local development — it's faster to iterate on.
+# - You can test service-to-service calls without a K8s cluster.
+# - CI can use compose for integration tests.
+#
+# NETWORKING IN COMPOSE:
+# All services share a network called `autoops-network`.
+# Services can reach each other by their SERVICE NAME.
+# e.g. order-service calls http://user-service:8001/users/...
+# This mirrors how Kubernetes DNS works (service-name:port).
+# ─────────────────────────────────────────────────────────────────
+
+
+# ── Shared network ─────────────────────────────────────────────
+# All containers join this network so they can talk to each other.
+networks:
+  autoops-network:
+    driver: bridge
+
+# ── Named volumes ──────────────────────────────────────────────
+# Volumes persist data between container restarts.
+# Without this, postgres data is lost every time you restart.
+volumes:
+  postgres-data:
+  redis-data:
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────
+  # Shared database for all services.
+  # POSTGRES_DB creates the initial database automatically.
+  postgres:
+    image: postgres:16-alpine
+    container_name: autoops-postgres
+    environment:
+      POSTGRES_USER: autoops
+      POSTGRES_PASSWORD: autoops_dev_password
+      POSTGRES_DB: autoops_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"   # expose to host so you can connect with psql or a GUI
+    networks:
+      - autoops-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoops -d autoops_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────
+  # Used as a job queue by worker-service.
+  # Also used for caching in payment-service.
+  redis:
+    image: redis:7-alpine
+    container_name: autoops-redis
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - autoops-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── user-service ────────────────────────────────────────────
+  user-service:
+    build:
+      context: ./demo-app/user-service   # folder with Dockerfile
+      dockerfile: Dockerfile
+    container_name: autoops-user-service
+    environment:
+      # Chaos modes — set to "true" to inject failures
+      CHAOS_ERROR_RATE: "0.0"
+      CHAOS_LATENCY_MS: "0"
+    ports:
+      - "8001:8001"
+    networks:
+      - autoops-network
+    depends_on:
+      postgres:
+        condition: service_healthy   # wait for postgres before starting
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── order-service ───────────────────────────────────────────
+  order-service:
+    build:
+      context: ./demo-app/order-service
+      dockerfile: Dockerfile
+    container_name: autoops-order-service
+    environment:
+      # This is the KEY concept: service discovery via DNS name
+      # In docker compose: use the service name (user-service)
+      # In Kubernetes:     http://user-service.demo-app.svc.cluster.local:8001
+      USER_SERVICE_URL: "http://user-service:8001"
+      CHAOS_ERROR_RATE: "0.0"
+      CHAOS_LATENCY_MS: "0"
+    ports:
+      - "8002:8002"
+    networks:
+      - autoops-network
+    depends_on:
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── payment-service ─────────────────────────────────────────
+  payment-service:
+    build:
+      context: ./demo-app/payment-service
+      dockerfile: Dockerfile
+    container_name: autoops-payment-service
+    environment:
+      # Chaos modes — the main ones we'll demo:
+      # CHAOS_MEMORY_LEAK=true  → pod gets OOMKilled
+      # CHAOS_CPU_SPIKE=true    → triggers HPA scale-out
+      # CHAOS_ERROR_RATE=0.8    → 80% of payments fail
+      CHAOS_MEMORY_LEAK: "false"
+      CHAOS_CPU_SPIKE: "false"
+      CHAOS_ERROR_RATE: "0.0"
+      CHAOS_LATENCY_MS: "0"
+    ports:
+      - "8003:8003"
+    networks:
+      - autoops-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── worker-service ──────────────────────────────────────────
+  worker-service:
+    build:
+      context: ./demo-app/worker-service
+      dockerfile: Dockerfile
+    container_name: autoops-worker-service
+    environment:
+      # CHAOS_CRASH_EVERY_N=5 → crashes after every 5 jobs
+      # This simulates CrashLoopBackOff
+      CHAOS_CRASH_EVERY_N: "0"
+      CHAOS_SLOW_JOBS: "false"
+    ports:
+      - "8004:8004"
+    networks:
+      - autoops-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
