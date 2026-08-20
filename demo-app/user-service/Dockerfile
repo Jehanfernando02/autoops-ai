@@ -29,7 +29,7 @@ COPY requirements.txt .
 # --no-cache-dir : don't store pip's download cache (saves ~50MB)
 # --target /deps : install packages into /deps instead of site-packages
 #                  so we can easily copy them in Stage 2
-RUN pip install --no-cache-dir --target=/deps -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore --target=/deps -r requirements.txt
 
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
@@ -41,7 +41,7 @@ FROM python:3.12-slim AS runtime
 # -r = system user (no home dir, no shell)
 # -g appuser = assign to appuser group
 # -u 1000 = explicit UID (good practice for K8s security contexts)
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
+RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-log-init --no-create-home appuser
 
 WORKDIR /app
 
